@@ -43,7 +43,12 @@ $c  = terraform output -raw container_name
    ```powershell
    az storage blob list --account-name $st --container-name $c --include v --auth-mode login -o table
    ```
-   Delete the blob, list with `--include d`, and bring it back with `az storage blob undelete`. Find both in the portal under *Containers → data → Show deleted blobs / versions*.
+   Delete the blob (`az storage blob delete ... --name hello.txt --auth-mode login`) and list with `--include d` – **nothing shows**. With versioning on, deleting the base blob just turns the current version into a *previous version*; list with `--include v` to see it. Restore it by copying a version back over the blob:
+   ```powershell
+   $v = "<versionId from the list>"
+   az storage blob copy start --account-name $st --destination-container $c --destination-blob hello.txt --source-uri "https://$st.blob.core.windows.net/$c/hello.txt?versionId=$v" --auth-mode login
+   ```
+   Soft delete protects what you delete *explicitly*, e.g. a single version. The CLI can't delete a specific version, and your *Storage Blob Data Contributor* role isn't allowed to (`OperationNotAllowedOnAutomaticSnapshot` – that needs *Storage Blob Data Owner*), so use the portal: *Containers → data*, switch **Authentication method** to *Access key*, open `hello.txt` → **Versions** tab → select an old version → **Delete**. Then tick **Show deleted blobs** (or list with `--include dv`), and restore it with **Undelete** in the portal.
 
 3. **User delegation SAS (signed with your Entra login, not the account key):**
    ```powershell
