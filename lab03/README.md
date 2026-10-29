@@ -90,7 +90,7 @@ $rg = terraform output -raw resource_group
    az lock delete -n no-delete -g $rg
 
    az lock create -n read-only --lock-type ReadOnly -g $rg
-   az network vnet update -g $rg -n vnet-test1 --set tags.test=1    # ScopeLocked - ReadOnly blocks changes too
+   az network vnet update -g $rg -n vnet-test1 --set tags.test=yes  # ScopeLocked - ReadOnly blocks changes too
    az lock delete -n read-only -g $rg
    ```
    **Remove every lock before cleaning up** – a lock also blocks `terraform destroy`.
