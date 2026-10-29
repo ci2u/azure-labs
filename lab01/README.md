@@ -3,7 +3,7 @@
 ## What you build
 Resource group → VNet (10.10.0.0/16) → subnet with an NSG (SSH from your IP only, HTTP open) → Standard public IP → NIC → Ubuntu 24.04 confidential VM (Standard_DC2as_v6, AMD SEV-SNP).
 
-> Why not B1s? It is `NotAvailableForSubscription` in Polandcentral. DC2as_v6 (~$0.12/h on Linux) is available, but it is a *confidential* VM size: it needs Secure Boot, vTPM, `security_encryption_type` on the OS disk and the Ubuntu `cvm` image SKU – all set in `main_1.tf`.
+> Why North Europe and DC2as_v6? In Poland Central every small size (B1s, B2ts_v2, D2as_v6, DC2as_v6…) is `NotAvailableForSubscription` for this subscription. In North Europe DC2as_v6 (~$0.11/h on Linux) is allowed, but it is a *confidential* VM size: it needs Secure Boot, vTPM, `security_encryption_type` on the OS disk and the Ubuntu `cvm` image SKU – all set in `main.tf`.
 
 ## Prerequisites
 - Azure CLI, Terraform ≥ 1.6, an SSH key (`ssh-keygen -t rsa -b 4096` if you don't have one)
@@ -30,4 +30,4 @@ ssh azureuser@$(terraform output -raw public_ip)
 ```bash
 terraform destroy
 ```
-A DC2as_v6 VM costs ~$88/month if left running, and leftover public IPs and disks still bill. Destroy at the end of each session.
+A DC2as_v6 VM costs ~$81/month if left running, and leftover public IPs and disks still bill. Destroy at the end of each session.

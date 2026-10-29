@@ -12,11 +12,11 @@ variable "prefix" {
 variable "location" {
   description = "Azure region. If the VM size is unavailable here, try westeurope, northeurope or swedencentral."
   type        = string
-  default     = "polandcentral"
+  default     = "northeurope"
 }
 
 variable "vm_size" {
-  description = "Confidential VM size (AMD SEV-SNP), 2 vCPU / 8 GiB. Must be a DC*as/DC*ads size - main_1.tf configures the VM as confidential."
+  description = "Confidential VM size (AMD SEV-SNP), 2 vCPU / 8 GiB. Must be a DC*as/DC*ads size - main.tf configures the VM as confidential."
   type        = string
   default     = "Standard_DC2as_v6"
 }
