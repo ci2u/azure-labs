@@ -1,0 +1,27 @@
+# Terraform working data (providers, modules) - recreated by `terraform init`
+**/.terraform/*
+
+# State files can contain secrets - never commit them
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Variable files hold your subscription ID, IP, etc. (keep the .example ones)
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Saved plans
+tfplan
+*.tfplan
+
+# CLI config overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# NOTE: .terraform.lock.hcl SHOULD be committed (pins provider versions)
