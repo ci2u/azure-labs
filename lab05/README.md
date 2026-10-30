@@ -32,7 +32,7 @@ Same as Lab 01: Azure CLI, Terraform ≥ 1.6, `az login`, an SSH key at `~/.ssh/
 Copy-Item ..\lab01\terraform.tfvars terraform.tfvars   # subscription_id + my_ip (check your IP: curl.exe -s ifconfig.me)
 terraform init
 terraform fmt; terraform validate
-terraform plan -out tfplan        # read it! should be 22 to add
+terraform plan -out tfplan        # read it! should be 21 to add
 terraform apply tfplan
 $rg  = terraform output -raw resource_group
 $url = terraform output -raw url
