@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars and fill in. Never commit terraform.tfvars.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+# github_repo   = "ci2u/azure-labs"   # owner/name of the repo whose workflows may log in to Azure
