@@ -102,7 +102,7 @@ Data takes **5–10 minutes** to start arriving in the workspace after apply. Ru
    - How long does Azure keep the activity log by default, and how do you keep it for a year?
    - The Log Analytics agent (MMA/OMS) was retired in August 2024. What replaced it, and what does a DCR add?
    - What happens to ingestion when the workspace hits its daily cap?
-   - What's the difference between an **action group** and an **alert processing rule**?
+   - What's the difference between an **action group** and an **alert processing rule**??
 
 ## Clean up – every time
 ```powershell
