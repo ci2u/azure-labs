@@ -1,0 +1,94 @@
+# Lab 08 - test, build, push and deploy the hello app to Azure Container Apps.
+# Setup (Terraform outputs -> repo variables) is in lab08/README.md.
+name: lab08 CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lab08/app/**"
+      - ".github/workflows/lab08-ci-cd.yml"
+  pull_request:
+    paths:
+      - "lab08/app/**"
+      - ".github/workflows/lab08-ci-cd.yml"
+  workflow_dispatch:
+
+# id-token: write lets a job request an OIDC token for azure/login
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  IMAGE_NAME: hello
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lab08/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest -v
+
+  build:
+    needs: test
+    # Pull requests only run the tests - they never get Azure credentials
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: meta
+        # Tag with the commit SHA, never "latest": every image maps to exactly one commit
+        run: echo "image=${{ vars.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push
+        run: |
+          az acr login --name "${{ vars.ACR_NAME }}"
+          docker build --build-arg APP_VERSION="${GITHUB_SHA::7}" -t "${{ steps.meta.outputs.image }}" lab08/app
+          docker push "${{ steps.meta.outputs.image }}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy new image
+        run: |
+          az extension add --name containerapp --upgrade --only-show-errors
+          az containerapp update \
+            --name "${{ vars.CONTAINER_APP }}" \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --image "${{ needs.build.outputs.image }}" \
+            --output none
+
+      - name: Smoke test
+        run: |
+          fqdn=$(az containerapp show --name "${{ vars.CONTAINER_APP }}" --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          # The app may be scaled to zero - retry while the first replica starts
+          body=$(curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://$fqdn/")
+          echo "$body"
+          echo "$body" | grep -q "(version ${GITHUB_SHA::7})"
