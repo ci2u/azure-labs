@@ -4,7 +4,7 @@ import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 VERSION = os.environ.get("APP_VERSION", "dev")
-GREETING = os.environ.get("GREETING", "Hey")
+GREETING = os.environ.get("GREETING", "Hey hey")
 
 
 def build_message(greeting, hostname, version):
