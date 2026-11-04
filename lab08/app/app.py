@@ -8,7 +8,7 @@ GREETING = os.environ.get("GREETING", "Hey")
 
 
 def build_message(greeting, hostname, version):
-    return f"{greeting} on {hostname} (version {version})\n"
+    return f"{greeting} from {hostname} (version {version})\n"
 
 
 class Handler(BaseHTTPRequestHandler):
