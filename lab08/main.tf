@@ -109,6 +109,13 @@ resource "azurerm_container_app_environment" "env" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   tags                = var.tags
+
+  # Azure now creates every environment with this built-in serverless profile.
+  # Declaring it stops a perpetual "remove workload_profile" diff on every plan.
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+  }
 }
 
 resource "azurerm_container_app" "app" {
@@ -116,6 +123,7 @@ resource "azurerm_container_app" "app" {
   container_app_environment_id = azurerm_container_app_environment.env.id
   resource_group_name          = azurerm_resource_group.rg.name
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption" # run on the serverless profile (scale to zero)
   tags                         = var.tags
 
   identity {
