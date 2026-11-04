@@ -87,8 +87,22 @@ jobs:
       - name: Smoke test
         run: |
           fqdn=$(az containerapp show --name "${{ vars.CONTAINER_APP }}" --resource-group "${{ vars.RESOURCE_GROUP }}" \
-            --query properties.configuration.ingress.fqdn -o tsv)
-          # The app may be scaled to zero - retry while the first replica starts
-          body=$(curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://$fqdn/")
-          echo "$body"
-          echo "$body" | grep -q "(version ${GITHUB_SHA::7})"
+            --query properties.configuration.ingress.fqdn -o tsv --only-show-errors)
+          expected="(version ${GITHUB_SHA::7})"
+          # The old revision keeps serving until the new one is ready, and the app may be
+          # scaled to zero - so keep asking until the NEW version answers (up to ~3 minutes)
+          for i in $(seq 1 18); do
+            body=$(curl -fsS --max-time 15 "https://$fqdn/" || true)
+            if echo "$body" | grep -qF "$expected"; then
+              echo "OK after attempt $i: $body"
+              exit 0
+            fi
+            echo "Attempt $i: new version not live yet, waiting 10s..."
+            sleep 10
+          done
+          echo "::error::App never answered with $expected. Last response (first 300 chars):"
+          echo "${body:0:300}"
+          az containerapp revision list --name "${{ vars.CONTAINER_APP }}" --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --query "[].{name:name, active:properties.active, traffic:properties.trafficWeight, health:properties.healthState, running:properties.runningState}" \
+            -o table --only-show-errors
+          exit 1
