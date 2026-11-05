@@ -1,0 +1,200 @@
+# Lab 09 - Terraform in a pipeline: plan on pull requests, apply on main after approval.
+# Setup (bootstrap outputs -> repo variables, "production" environment) is in lab09/README.md.
+#
+#   pull request  -> plan (fmt, validate, plan) -> plan posted as a PR comment
+#   merge to main -> plan -> tfplan artifact -> [approval: production] -> apply tfplan
+name: lab09 Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lab09/stack/**"
+      - ".github/workflows/lab09-terraform.yml"
+  pull_request:
+    paths:
+      - "lab09/stack/**"
+      - ".github/workflows/lab09-terraform.yml"
+  workflow_dispatch:
+
+# Each job adds only the extra rights it needs
+permissions:
+  contents: read
+
+# Runs on main queue up instead of racing: a run waiting for approval blocks the next one.
+# Pull requests get their own group, so a plan on a PR never waits for that approval.
+# Never cancel a running job: killing Terraform can leave the state lock behind.
+concurrency:
+  group: lab09-terraform-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'main' }}
+  cancel-in-progress: false
+
+# No credentials in code: with ARM_USE_OIDC the provider and the backend both
+# exchange the GitHub OIDC token. Each job sets its own ARM_CLIENT_ID.
+env:
+  ARM_USE_OIDC: "true"
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_IN_AUTOMATION: "true"
+  TF_VERSION: "1.16.5"
+
+defaults:
+  run:
+    working-directory: lab09/stack
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC login
+      pull-requests: write # plan comment
+    env:
+      ARM_CLIENT_ID: ${{ vars.LAB09_PLAN_CLIENT_ID }} # Reader on rg-lab09
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false # the plan step needs Terraform's real exit code
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.LAB09_TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.LAB09_TFSTATE_ACCOUNT }}"
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes to apply
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode -out=tfplan 2>&1 | tee plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo '## Terraform plan'
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 2 ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Exit code 2 is not a failure here - only a real error stops the job
+          if [ "$code" -eq 1 ]; then
+            exit 1
+          fi
+
+      - name: Post plan to the pull request
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.plan.outcome != 'skipped' }}
+        uses: actions/github-script@v7
+        env:
+          PLAN_EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- lab09-terraform-plan -->';
+            const limit = 60000; // a GitHub comment holds at most 65536 characters
+
+            let plan = fs.readFileSync('lab09/stack/plan.txt', 'utf8');
+            if (plan.length > limit) {
+              plan = plan.slice(0, limit) + '\n... truncated - see the workflow run for the full plan';
+            }
+
+            const summaries = {
+              '0': 'No changes',
+              '1': 'Plan failed',
+              '2': (plan.match(/^Plan: .*$/m) || ['Changes to apply'])[0],
+            };
+            const summary = summaries[process.env.PLAN_EXITCODE] ?? 'Plan failed';
+
+            const body = [
+              marker,
+              `### Terraform plan: ${summary}`,
+              `Commit ${context.payload.pull_request.head.sha.slice(0, 7)}`,
+              '<details><summary>Show plan</summary>',
+              '',
+              '```',
+              plan,
+              '```',
+              '</details>',
+            ].join('\n');
+
+            // Update the existing comment, so a PR with many pushes keeps a single one
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      # Apply must run exactly what was planned (and approved), so the plan travels as an artifact.
+      # A saved plan contains the config and resource values, and artifacts of a public repo
+      # can be downloaded by any signed-in GitHub user: keep secrets out of this stack.
+      - name: Upload tfplan
+        if: ${{ github.event_name != 'pull_request' && steps.plan.outputs.has_changes == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: lab09/stack/tfplan
+          retention-days: 5
+          if-no-files-found: error
+
+  apply:
+    needs: plan
+    # Only an explicit push or manual run on main, and only when there is something to do.
+    # Any other event (a future schedule, say) stops at the plan.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    # Waits here for the required reviewers. This is also what gives the job the OIDC
+    # subject "environment:production", the only one id-lab09-apply trusts.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC login
+    env:
+      ARM_CLIENT_ID: ${{ vars.LAB09_APPLY_CLIENT_ID }} # Contributor on rg-lab09
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${{ vars.LAB09_TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.LAB09_TFSTATE_ACCOUNT }}"
+
+      - name: Download tfplan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: lab09/stack
+
+      - name: Terraform apply
+        # If the state changed since this plan was made, Terraform refuses ("Saved plan is stale")
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
